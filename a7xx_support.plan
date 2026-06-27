@@ -22,6 +22,19 @@ so a7xx hardware differences (e.g. `RBBM_PERFCTR2_*`, `REG6`/`REG7` register
 mixing, BV counter selects) are handled entirely inside the KGSL driver. The
 library code therefore does not need to change its ioctl surface.
 
+- **Data source for A7XX**: A7XX register XML is **not** present in the
+  envytools submodule (verified at commit `d88cafa3` — no `a7xx.xml` in
+  `third_party/envytools/registers/adreno/`, and no A7XX-related commits in
+  the entire submodule history). The reference data source is mesa's
+  `mesa/src/freedreno/registers/adreno/a7xx_perfcntrs.xml`, which uses the
+  same `nouveau:` XML namespace. It has been vendored into
+  `third_party/envytools/registers/adreno/a7xx.xml`, with a sibling
+  `freedreno_copyright.xml` copy so the existing `<import>` directives
+  resolve. A live parse of the vendored file yields **18 groups, 966
+  countables** (CP 81, RBBM 14, PC 52, VFD 25, HLSQ 58, VPC 44, TSE 20,
+  RAS 30, UCHE 59, TP 133, SP 151, RB 54, VSC 5, CCU 23, LRZ 28, CMP 50,
+  GBIF 81, UFC 58). The two a7xx-only groups are `GBIF` and `UFC`.
+
 ## Key facts from the codebase investigation
 
 - Script: `scripts/generate_adreno_definitions.py` reads two envytools-style
@@ -40,7 +53,11 @@ library code therefore does not need to change its ioctl surface.
   resulting symbol would keep a stray `A7XX_` prefix and break the
   group-prefix convention. The script must also strip the leading
   `<series>_` prefix to stay consistent and to keep `get_common_series()`
-  symbol-level matching intact.
+  symbol-level matching intact. **Verified empirically**: with the current
+  script unchanged, the common set across (a5xx, a6xx, a7xx) collapses to
+  zero in every shared group because the symbols no longer match
+  (`ALWAYS_COUNT` vs `A7XX_ALWAYS_COUNT`). After the prefix fix the common
+  set resumes normally.
 - A7XX adds two new groups not present in A6XX:
   - `a7xx_gbif_perfcounter_select` (GBIF)
   - `a7xx_ufc_perfcounter_select`  (UFC)
@@ -105,13 +122,19 @@ library code therefore does not need to change its ioctl surface.
      counters (e.g. `SP_BUSY_CYCLES`, `SP_VS_INSTRUCTIONS`,
      `SP_FS_INSTRUCTIONS`).
 
-9. `third_party/envytools/registers/adreno/a7xx.xml`
-   - Bring the A7XX XML into the submodule (or add an alternate data
-     source path). Note: mesa's
-     `mesa/src/freedreno/registers/adreno/a7xx_perfcntrs.xml` uses the
-     `A7XX_PERF_*` form; the envytools `a7xx.xml` format should be
-     verified before this is finalized, since the script's prefix-strip
-     logic must match the actual on-disk naming.
+9. `third_party/envytools/registers/adreno/a7xx.xml` (vendored, done)
+   - Copied from `mesa/src/freedreno/registers/adreno/a7xx_perfcntrs.xml`
+     (59576 bytes, 18 enums, 966 values).
+   - Sibling `third_party/envytools/registers/adreno/freedreno_copyright.xml`
+     added so the file's `<import>` directive resolves (envytools convention
+     keeps copyright under `registers/`, the copy moves it next to
+     `adreno/`-level files where the a7xx XML lives).
+   - The vendored file is now inside the submodule path but **not** tracked
+     by it (it is a regular tracked file in the superproject, not part of
+     envytools' own tree). On `git submodule update`, it will be wiped.
+     It should be re-copied, or better, placed outside the submodule
+     (e.g. `third_party/a7xx_perfcntrs.xml` in the superproject) and
+     pointed at by the script. **TODO: relocate before committing**.
 
 10. `README.md`
     - Mention A7XX support in the "Goals and Features" section.
@@ -131,9 +154,12 @@ library code therefore does not need to change its ioctl surface.
 
 ## Risk / open questions
 
-- **Data source XML format**: mesa `a7xx_perfcntrs.xml` uses
-  `name="A7XX_PERF_*"`; envytools `a7xx.xml` may differ. Verify before
-  finalizing the script's prefix-strip.
+- **Data source XML format**: confirmed via live parse of the vendored
+  file. All 966 value names start with `A7XX_PERF_` (e.g.
+  `A7XX_PERF_CP_ALWAYS_COUNT`). The script's prefix-strip fix is
+  therefore: after stripping `PERF_`, also strip a leading `<series>_`
+  (case-sensitive, e.g. `A7XX_`). This is generic and will work for
+  A8XX too if/when that data source arrives.
 - **`gpu_id` range for A7XX**: A702 stays in A6XX branch (it is an A6XX
   derivative). Need to confirm the upper bound for A7XX; `FD750` and
   `Adreno X1-85` are 4-digit IDs but still < 1000. Initial assumption:
@@ -146,12 +172,19 @@ library code therefore does not need to change its ioctl surface.
 
 ## Suggested order of implementation
 
-1. Verify A7XX XML source format (mesa vs. envytools).
-2. Update `generate_adreno_definitions.py` (symbol stripping, group IDs,
+1. ~~Verify A7XX XML source format (mesa vs. envytools).~~ **DONE**: mesa
+   format vendored at `third_party/envytools/registers/adreno/a7xx.xml`;
+   live-parsed; 18 groups, 966 countables, all named `A7XX_PERF_*`.
+2. **Relocate the vendored a7xx XML outside the submodule** so it is
+   not wiped by `git submodule update`. Suggested location:
+   `third_party/a7xx_perfcntrs.xml` (superproject-tracked) with a
+   clear README at `third_party/a7xx_perfcntrs.README.md` explaining
+   provenance and upstream sync procedure.
+3. Update `generate_adreno_definitions.py` (symbol stripping, group IDs,
    new `--a7xx_xml` arg, common over three series).
-3. Add `a7xx.h` and `a7xx.c` shells with the autogen marker.
-4. Extend `context.h` / `context.c` with the A7XX series enum and
+4. Add `a7xx.h` and `a7xx.c` shells with the autogen marker.
+5. Extend `context.h` / `context.c` with the A7XX series enum and
    detection.
-5. Wire `lib/gpu/adreno/CMakeLists.txt` and `scripts/CMakeLists.txt`.
-6. Build, run the example.
-7. Commit, push, update README.
+6. Wire `lib/gpu/adreno/CMakeLists.txt` and `scripts/CMakeLists.txt`.
+7. Build, run the example.
+8. Commit, push, update README.
