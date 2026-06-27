@@ -27,13 +27,19 @@ library code therefore does not need to change its ioctl surface.
   `third_party/envytools/registers/adreno/`, and no A7XX-related commits in
   the entire submodule history). The reference data source is mesa's
   `mesa/src/freedreno/registers/adreno/a7xx_perfcntrs.xml`, which uses the
-  same `nouveau:` XML namespace. It has been vendored into
-  `third_party/envytools/registers/adreno/a7xx.xml`, with a sibling
-  `freedreno_copyright.xml` copy so the existing `<import>` directives
-  resolve. A live parse of the vendored file yields **18 groups, 966
-  countables** (CP 81, RBBM 14, PC 52, VFD 25, HLSQ 58, VPC 44, TSE 20,
-  RAS 30, UCHE 59, TP 133, SP 151, RB 54, VSC 5, CCU 23, LRZ 28, CMP 50,
-  GBIF 81, UFC 58). The two a7xx-only groups are `GBIF` and `UFC`.
+  same `nouveau:` XML namespace. It has been vendored at
+  `third_party/a7xx/a7xx.xml` (sibling to the submodule, superproject-
+  tracked) with a `third_party/a7xx/README.md` documenting provenance and
+  refresh procedure. The file was renamed `a7xx_perfcntrs.xml` →
+  `a7xx.xml` so the script's filename-based series detection
+  (`parse_xml_file`) yields `"a7xx"`, matching the enum prefix
+  `a7xx_<group>_perfcounter_select`. The three `<import file="..."/>`
+  directives were stripped — they reference copyright metadata that the
+  script does not need. A live parse of the vendored file yields
+  **18 groups, 966 countables** (CP 81, RBBM 14, PC 52, VFD 25, HLSQ 58,
+  VPC 44, TSE 20, RAS 30, UCHE 59, TP 133, SP 151, RB 54, VSC 5, CCU 23,
+  LRZ 28, CMP 50, GBIF 81, UFC 58). The two a7xx-only groups are
+  `GBIF` and `UFC`.
 
 ## Key facts from the codebase investigation
 
@@ -122,19 +128,20 @@ library code therefore does not need to change its ioctl surface.
      counters (e.g. `SP_BUSY_CYCLES`, `SP_VS_INSTRUCTIONS`,
      `SP_FS_INSTRUCTIONS`).
 
-9. `third_party/envytools/registers/adreno/a7xx.xml` (vendored, done)
+9. `third_party/a7xx/a7xx.xml` (vendored, done, **moved out of submodule**)
    - Copied from `mesa/src/freedreno/registers/adreno/a7xx_perfcntrs.xml`
-     (59576 bytes, 18 enums, 966 values).
-   - Sibling `third_party/envytools/registers/adreno/freedreno_copyright.xml`
-     added so the file's `<import>` directive resolves (envytools convention
-     keeps copyright under `registers/`, the copy moves it next to
-     `adreno/`-level files where the a7xx XML lives).
-   - The vendored file is now inside the submodule path but **not** tracked
-     by it (it is a regular tracked file in the superproject, not part of
-     envytools' own tree). On `git submodule update`, it will be wiped.
-     It should be re-copied, or better, placed outside the submodule
-     (e.g. `third_party/a7xx_perfcntrs.xml` in the superproject) and
-     pointed at by the script. **TODO: relocate before committing**.
+     (59454 bytes, 18 enums, 966 values).
+   - Renamed to `a7xx.xml` and placed at
+     `third_party/a7xx/a7xx.xml` so it is superproject-tracked and not
+     wiped by `git submodule update`. The earlier placement at
+     `third_party/envytools/registers/adreno/a7xx.xml` was reverted.
+   - The three `<import file="..."/>` directives were stripped: the
+     script does not resolve XInclude-style imports and only needs the
+     `<enum>` elements.
+   - A `third_party/a7xx/README.md` documents the provenance, license,
+     refresh procedure (`cp` from mesa + `sed -i '/<import file=/d'`),
+     and a parse-sanity check.
+   - Script invocation: `--a7xx_xml "${HPC_SOURCE_ROOT}/third_party/a7xx/a7xx.xml"`.
 
 10. `README.md`
     - Mention A7XX support in the "Goals and Features" section.
@@ -173,18 +180,13 @@ library code therefore does not need to change its ioctl surface.
 ## Suggested order of implementation
 
 1. ~~Verify A7XX XML source format (mesa vs. envytools).~~ **DONE**: mesa
-   format vendored at `third_party/envytools/registers/adreno/a7xx.xml`;
-   live-parsed; 18 groups, 966 countables, all named `A7XX_PERF_*`.
-2. **Relocate the vendored a7xx XML outside the submodule** so it is
-   not wiped by `git submodule update`. Suggested location:
-   `third_party/a7xx_perfcntrs.xml` (superproject-tracked) with a
-   clear README at `third_party/a7xx_perfcntrs.README.md` explaining
-   provenance and upstream sync procedure.
-3. Update `generate_adreno_definitions.py` (symbol stripping, group IDs,
+   format vendored at `third_party/a7xx/a7xx.xml`; live-parsed; 18
+   groups, 966 countables, all named `A7XX_PERF_*`. Submodule is clean.
+2. Update `generate_adreno_definitions.py` (symbol stripping, group IDs,
    new `--a7xx_xml` arg, common over three series).
-4. Add `a7xx.h` and `a7xx.c` shells with the autogen marker.
-5. Extend `context.h` / `context.c` with the A7XX series enum and
+3. Add `a7xx.h` and `a7xx.c` shells with the autogen marker.
+4. Extend `context.h` / `context.c` with the A7XX series enum and
    detection.
-6. Wire `lib/gpu/adreno/CMakeLists.txt` and `scripts/CMakeLists.txt`.
-7. Build, run the example.
-8. Commit, push, update README.
+5. Wire `lib/gpu/adreno/CMakeLists.txt` and `scripts/CMakeLists.txt`.
+6. Build, run the example.
+7. Commit, push, update README.
