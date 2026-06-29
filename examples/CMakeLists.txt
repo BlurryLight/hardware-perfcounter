@@ -30,6 +30,15 @@ if(HPC_ENABLE_GPU_ADRENO)
     DEPS
       hpc::gpu::adreno::a6xx
   )
+
+  hpc_cc_binary(
+    NAME
+      adreno_bandwidth_c_example
+    SRCS
+      adreno_bandwidth_c_example.c
+    DEPS
+      hpc::gpu::adreno::common
+  )
 endif(HPC_ENABLE_GPU_ADRENO)
 
 if(HPC_ENABLE_GPU_MALI)
